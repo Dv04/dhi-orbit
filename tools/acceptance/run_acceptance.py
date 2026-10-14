@@ -24,7 +24,7 @@ key('j'); await sleep(150); out.j_marks_current=!!document.querySelector('.strip
 key('j'); await sleep(150); out.j_moves=document.querySelector('.strip.cur')?.id==='s-1';
 key('k'); await sleep(150); out.k_moves_back=document.querySelector('.strip.cur')?.id==='s-0';
 key('k',{metaKey:true}); await sleep(250); const pal=document.querySelector('dialog.palette'); out.cmdk_opens_palette=!!(pal&&pal.open); pal&&pal.close();
-key('?'); await sleep(150); out.help_toast=document.getElementById('toast').classList.contains('on');
+key('?'); await sleep(150); out.help_sheet=!!document.querySelector('.keys-sheet'); key('Escape'); await sleep(100); out.esc_closes_help=!document.querySelector('.keys-sheet');
 key('g'); await sleep(1500); out.g_opens_graph=location.hash==='#/graph' && !document.getElementById('graphview').hidden;
 const g=window.__graph; if(g){ g.canvas.focus(); g.focus=null; g.key({key:'ArrowRight',preventDefault(){}}); out.arrow_focuses_node=!!g.focus;
   g.key({key:'Enter',preventDefault(){}}); out.enter_opens_panel=!g.panel.hidden; g.key({key:'Escape',preventDefault(){}}); out.esc_closes_panel=g.panel.hidden; }
