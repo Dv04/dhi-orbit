@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Dialog card test</title>
+<!-- Permission dialog cards: Yes / No buttons from the chat's screen, never a free-text box on a dialog. Run: node cards_dialog_test.mjs -->
+<div id="toast"></div>
+<div id="root"></div>
+<script type="module">
+  const { cardBody } = await import("../../dhi_orbit/ui/js/cards.js");
+  const ui = { drafts: new Map(), terminal: (x) => (window.__term = x.session_id), refresh() {}, send() {} };
+  const base = { session_id: "s1", key: "k1", title: "chat", text: "Bash: rm -rf build", since: 0, seconds: 5, excluded: false };
+  const shot = (x) => { const el = cardBody(x, ui, () => {}); document.getElementById("root").replaceChildren(el); return el; };
+  const out = {};
+  let el = shot({ ...base, id: "dialog:k1", kind: "dialog", screen: { question: "Do you want to proceed?",
+    options: [{ n: 1, label: "Yes" }, { n: 2, label: "Yes, and don't ask again" }, { n: 3, label: "No" }] } });
+  out.screen_buttons = [...el.querySelectorAll("button.opt")].map((b) => b.textContent);
+  out.screen_textarea = !!el.querySelector("textarea");
+  el = shot({ ...base, id: "dialog:k2", kind: "dialog", screen: null, draft: { text: "yes", class: "retrieved" } });
+  out.noscreen_textarea = !!el.querySelector("textarea");
+  out.noscreen_draft = !!el.querySelector("details.draft");
+  const t = [...el.querySelectorAll("button")].find((b) => /Terminal/.test(b.textContent));
+  out.noscreen_terminal = !!t; t && t.click(); out.terminal_called = window.__term === "s1";
+  el = shot({ ...base, id: "blocked:k3", kind: "blocked", screen: null });
+  out.prose_textarea = !!el.querySelector("textarea");
+  const want = { screen_buttons: ["1Yes", "2Yes, and don't ask again", "3No"], screen_textarea: false, noscreen_textarea: false,
+    noscreen_draft: false, noscreen_terminal: true, terminal_called: true, prose_textarea: true };
+  const fails = Object.keys(want).filter((k) => JSON.stringify(out[k]) !== JSON.stringify(want[k]));
+  window.__result = JSON.stringify({ pass: !fails.length, fails: fails.map((k) => ({ k, got: out[k], want: want[k] })) });
+</script>
