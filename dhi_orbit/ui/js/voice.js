@@ -15,7 +15,13 @@ export class Voice {
     this.ui = ui;
     this.panel = document.body.appendChild(h("div", { class: "pop voice", role: "dialog", "aria-label": "Voice", hidden: true }));
     this.on = false;
+    this.gen = 0;           // one voice loop at a time: starting another (or Stop) ends the one before
+    this.rec = null;        // the recognizer listening now, so Stop can close the microphone at once
   }
+
+  begin() { this.end(); this.on = true; return ++this.gen; }
+  live(g) { return this.on && g === this.gen; }
+  end() { this.on = false; this.gen++; speechSynthesis.cancel(); if (this.rec) { try { this.rec.abort(); } catch { /* already ended */ } this.rec = null; } }
 
   voices() {
     const all = speechSynthesis.getVoices();
@@ -42,13 +48,15 @@ export class Voice {
   // it, it falls back to the browser's speech service and the panel says audio may leave the Mac.
   async listen(ms = 9000) {
     if (!SR) { this.lastError = "no speech recognition in this browser"; return null; }
+    const g = this.gen;
     await new Promise((r) => setTimeout(r, 300));          // let the spoken prompt's tail clear the speakers
     const until = Date.now() + ms;
     this.lastError = null;
     if (this.local == null) this.local = await localReady();
     let restarts = 0;
-    while (this.on && Date.now() < until) {
+    while (this.live(g) && Date.now() < until) {
       const res = await this.once(until - Date.now());
+      if (!this.live(g)) return null;                        // stopped (or another loop started) while listening
       if (res.text) return res.text;
       const err = res.error;
       if (err === "language-not-supported" || err === "service-not-allowed" && this.local) {
@@ -67,11 +75,11 @@ export class Voice {
 
   once(ms) {
     return new Promise((res) => {
-      const r = new SR();
+      const r = this.rec = new SR();
       r.lang = "en-US"; r.interimResults = true; r.maxAlternatives = 1; r.continuous = true;
       if (this.local && "processLocally" in r) { try { r.processLocally = true; } catch { this.local = false; } }
       let done = false, error = null, text = "";
-      const end = () => { if (done) return; done = true; clearTimeout(t); try { r.stop(); } catch { /* already */ } res({ text: text.trim() || null, error }); };
+      const end = () => { if (done) return; done = true; clearTimeout(t); if (this.rec === r) this.rec = null; try { r.stop(); } catch { /* already */ } res({ text: text.trim() || null, error }); };
       r.onresult = (e) => {
         let interim = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -96,7 +104,7 @@ export class Voice {
       h("button", { class: "btn", onclick: () => this.stop() }, "Stop voice"));
   }
 
-  stop(keepPanel = false) { this.on = false; speechSynthesis.cancel(); if (!keepPanel) this.panel.hidden = true; }
+  stop(keepPanel = false) { this.end(); if (!keepPanel) this.panel.hidden = true; }
 
   summary() {
     const ov = this.ui.overview();
@@ -117,7 +125,7 @@ export class Voice {
     return parts.join(" ");
   }
 
-  async briefing() { this.on = true; await this.say(this.summary()); }
+  async briefing() { const g = this.begin(); await this.say(this.summary()); if (g === this.gen) this.on = false; }   // done: the panel no longer follows you
 
   readItem(x) {
     const opts = (x.parts && x.parts.length === 1 ? x.parts[0].options : x.options || []).map((o, i) => `Option ${i + 1}: ${o.label.replace(/\(recommended\)/i, ", recommended")}.`);
@@ -126,15 +134,16 @@ export class Voice {
 
   // Hands-free: read each answerable decision; accept a spoken option number, then confirm.
   async handsFree() {
-    this.on = true;
+    const g = this.begin();
     const items = (this.ui.overview()?.needs_you || []).filter((x) => !x.excluded && x.kind === "decision" && (x.parts || []).length <= 1);
-    if (!items.length) return this.say("No decisions to answer by voice right now. " + this.summary());
+    if (!items.length) { await this.say("No decisions to answer by voice right now. " + this.summary()); if (g === this.gen) this.on = false; return; }
     for (const x of items) {
-      if (!this.on) return;
+      if (!this.live(g)) return;
       await this.say(this.readItem(x) + " Say an option number, skip, or repeat.");
       let heard = await this.listen();
+      if (!this.live(g)) return;
       if (!heard && this.lastError && this.lastError !== "heard nothing") { await this.say("Speech input is not working: " + this.lastError + ". Voice stopped."); return this.stop(true); }
-      if (heard && /repeat/i.test(heard)) { await this.say(this.readItem(x)); heard = await this.listen(); }
+      if (heard && /repeat/i.test(heard)) { await this.say(this.readItem(x)); heard = await this.listen(); if (!this.live(g)) return; }
       if (!heard || /skip|next|later/i.test(heard)) continue;
       const r = await post("intent", { text: heard, model: false }).catch(() => null);
       const n = r && r.cmd === "answer" ? r.option : null;
@@ -142,22 +151,24 @@ export class Voice {
       if (!n || !opts[n - 1]) { await this.say(`I heard "${heard}", which is not an option. Skipping.`); continue; }
       await this.say(`Option ${n}: ${opts[n - 1].label}. Say yes to send.`);
       const yes = await this.listen(5000);
+      if (!this.live(g)) return;
       if (yes && /^\s*(yes|yeah|yep|send|confirm)/i.test(yes)) {
         this.ui.send(x, x.parts && x.parts.length ? { answers: { 0: opts[n - 1].id } } : { option_id: opts[n - 1].id }, opts[n - 1].label);
         await this.say("Sent.");
       } else await this.say("Not sent.");
     }
     await this.say("That was the last one.");
+    if (g === this.gen) this.on = false;
   }
 
   // Conversation mode: any sentence -> intent -> read back -> yes -> run.
   async converse() {
-    this.on = true;
+    const g = this.begin();
     let misses = 0;
     await this.say("Listening. Say what you want, for example: what needs me, or reply continue to papers.");
-    while (this.on) {
+    while (this.live(g)) {
       const heard = await this.listen(9000);
-      if (!this.on) return;
+      if (!this.live(g)) return;
       if (!heard) {
         misses = (misses || 0) + 1;
         if (this.lastError && this.lastError !== "heard nothing") { await this.say("Speech input is not working: " + this.lastError + ". Voice stopped."); return this.stop(true); }
@@ -173,6 +184,7 @@ export class Voice {
       if (r.confirm || r.source === "model") {
         await this.say(`${describe(r)}. Say yes to do it.`);
         const yes = await this.listen(5000);
+        if (!this.live(g)) return;
         if (!(yes && /^\s*(yes|yeah|yep|do it|confirm|send)/i.test(yes))) { await this.say("Cancelled."); continue; }
       }
       const said = await this.ui.runIntent(r);

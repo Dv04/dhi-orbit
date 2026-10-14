@@ -25,7 +25,8 @@ const ui = {
   cur: 0,
   items: [],
   setGroup(m) { ui.group = m; store.set("group", m); render(); },
-  openChat: (sid, o = {}) => { if (o.focus) chat.wantFocus = true; if (curSid() === sid) { if (o.focus) { chat.wantFocus = false; chat.focusBox(); } } else location.hash = "#/chat/" + encodeURIComponent(sid); },
+  // Focus now only when this chat's page is built; while it loads, open() focuses its box (the old chat's box is about to go).
+  openChat: (sid, o = {}) => { if (o.focus) chat.wantFocus = true; if (curSid() === sid) { if (o.focus && chat.sid === sid && chat.built) { chat.wantFocus = false; chat.focusBox(); } } else location.hash = "#/chat/" + encodeURIComponent(sid); },
   previewChat: (sid) => { clearTimeout(previewT); previewT = setTimeout(() => { if (curSid() !== sid) location.replace("#/chat/" + encodeURIComponent(sid)); }, 140); },
   focusList: () => {
     const root = splitMode && route() === "chat" ? splitList : side;
@@ -63,7 +64,7 @@ const ui = {
     const d = draftOf(ui, x.id);
     d.reply = dr.text;
     render();
-    const ta = document.querySelector(`[data-fk="${CSS.escape(x.id + ":reply")}"]`);
+    const ta = replyBox(x);
     if (ta) { ta.value = dr.text; ta.focus(); }
     try { await post(`suggestions/${dr.id}/used`); } catch { /* the count is a nicety */ }
     toast("Draft placed in the reply box; edit it, then Reply");
@@ -77,7 +78,14 @@ const ui = {
     catch (e) { toast(`Gate not changed: ${e.message}`); }
   },
 };
-configure({ refresh: () => overview.now(), sent: (item) => ui.drafts.delete(item.id) });
+// After a send: empty that item's reply text (the strip and card closures share the draft object) and every box showing it, so a
+// second Reply cannot send it again and the text does not come back while the item stays on the board.
+configure({ refresh: () => overview.now(), sent: (item) => {
+  const d = ui.drafts.get(item.id);
+  if (d) d.reply = "";
+  ui.drafts.delete(item.id);
+  if (item.id != null) document.querySelectorAll(`textarea[data-fk="${CSS.escape(item.id + ":reply")}"]`).forEach((ta) => { ta.value = ""; });
+} });
 
 const rail = document.getElementById("rail");
 const main = document.getElementById("main");
@@ -428,12 +436,18 @@ function confirmLowRisk(list) {
   pop.querySelector(".btn.primary").focus();
 }
 
+// The item's reply box you can see: the hidden chat view keeps a copy of the same card earlier in the page.
+function replyBox(x) {
+  const all = [...document.querySelectorAll(`[data-fk="${CSS.escape(x.id + ":reply")}"]`)];
+  return all.find((e) => e.offsetParent !== null) || all[0] || null;
+}
+
 const EVIDENCE_ASK = "Before I answer: show the evidence for your last result. Name the exact command you ran to check it and paste its last output line verbatim; if nothing was verified, say so plainly.";
 function askEvidence(x) {
   const d = draftOf(ui, x.id);
   d.reply = EVIDENCE_ASK;
   render();
-  const ta = document.querySelector(`[data-fk="${CSS.escape(x.id + ":reply")}"]`);
+  const ta = replyBox(x);
   if (ta) { ta.value = EVIDENCE_ASK; ta.focus(); }
   toast("Prefilled; edit if you like, then Reply");
 }

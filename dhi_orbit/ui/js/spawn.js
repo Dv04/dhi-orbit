@@ -2,7 +2,7 @@
 // : the suggested seat is preselected and every seat shows its headroom.
 import { h, toast, ct } from "./lib.js";
 import { get, post } from "./api.js";
-import { micFor } from "./dictate.js";
+import { micFor, stopDictation } from "./dictate.js";
 import { ATTACH_MAX, ATTACH_ACCEPT, attachNote, uploadFile, fmtSize } from "./chat.js";
 
 const BIG_WORDS = /\b(build|design|migrate|refactor|plan|research|new product)\b/i;
@@ -34,7 +34,10 @@ export async function spawnDialog({ workItem, seat, parent, seats, onDone, brief
   try { wiList = (await get("workitems")).work_items || []; } catch { /* no work items: the picker offers free chat only */ }
   const home = (wi && wi.home_seat) || null;
   const pick = seat || home;
-  dlg = dlg || document.body.appendChild(h("dialog", { class: "spawn", "aria-label": "Start a session" }));
+  if (!dlg) {
+    dlg = document.body.appendChild(h("dialog", { class: "spawn", "aria-label": "Start a session" }));
+    dlg.addEventListener("close", () => stopDictation());   // the dialog stays in the page: dictation would keep writing into the hidden brief
+  }
   const sel = h("select", { id: "sp-seat", "aria-label": "Seat" }, seats.filter((s) => !s.excluded).map((s) =>
     h("option", { value: s.seat, selected: s.seat === pick }, `${s.seat}${s.seat === home ? " (most spare)" : ""}: ${s.state}, ${headroom(s)}`)));
   const ta = h("textarea", { id: "sp-brief", rows: "8", "aria-label": "Brief" });
@@ -95,7 +98,9 @@ export async function spawnDialog({ workItem, seat, parent, seats, onDone, brief
     curWi = wsel.value;
     if (!curWi) { if (ta.value === autoBrief) { ta.value = ""; autoBrief = ""; } sync(); return; }
     try {
-      const b = await get("workitems/" + encodeURIComponent(curWi) + "/brief");
+      const want = curWi;
+      const b = await get("workitems/" + encodeURIComponent(want) + "/brief");
+      if (want !== curWi) return;                          // another work item was picked meanwhile: its brief wins
       if (!ta.value.trim() || ta.value === autoBrief) { ta.value = (b && b.brief) || ""; autoBrief = ta.value; }
       if (b && b.home_seat && [...sel.options].some((o) => o.value === b.home_seat)) { sel.value = b.home_seat; seatWarn(); }
       sync();

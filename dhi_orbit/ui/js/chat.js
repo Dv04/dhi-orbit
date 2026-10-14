@@ -5,7 +5,7 @@ import { h, ct, age, toast } from "./lib.js";
 import { seatsAtLimit, limitWord } from "./limits.js";
 import { md } from "./md.js";
 import { get, post, TOKEN } from "./api.js";
-import { micFor } from "./dictate.js";
+import { micFor, stopDictation } from "./dictate.js";
 import { cardBody, timeoutLine } from "./cards.js";
 import { DocsDrawer, onDocLink } from "./docs.js";
 
@@ -45,7 +45,7 @@ export class ChatView {
 
   async open(sid) {
     clearInterval(this.timer);
-    if (sid !== this.sid) { if (this.sid) this.drafts.set(this.sid, this.reply || ""); this.sid = sid; this.entries = []; this.reply = this.drafts.get(sid) || ""; }
+    if (sid !== this.sid) { stopDictation(); if (this.sid) this.drafts.set(this.sid, this.reply || ""); this.sid = sid; this.entries = []; this.reply = this.drafts.get(sid) || ""; }
     const tok = this.tok = (this.tok || 0) + 1;       // arrowing through chats fast: only the last one opened may paint
     this.built = null;
     if (this.embedded && this.pageEl && this.el.contains(this.pageEl)) this.el.classList.add("loading");   // keep the old chat dimmed instead of a flash
@@ -69,12 +69,14 @@ export class ChatView {
     this.timer = setInterval(() => this.poll(), 5000);
   }
 
-  close() { clearInterval(this.timer); this.timer = null; this.docs.close(); }
+  close() { clearInterval(this.timer); this.timer = null; this.tok = (this.tok || 0) + 1; this.docs.close(); }   // a pending open() must not paint or start a poll after leaving
 
   async poll() {
     if (document.hidden || !this.sid) return;
+    const sid = this.sid, tok = this.tok;
     try {
-      const d = await get(`sessions/${encodeURIComponent(this.sid)}/transcript?limit=${PAGE}`);
+      const d = await get(`sessions/${encodeURIComponent(sid)}/transcript?limit=${PAGE}`);
+      if (sid !== this.sid || tok !== this.tok) return;          // another chat opened meanwhile: its pane is not this answer's
       const changed = d.total !== this.total || JSON.stringify(d.session) !== JSON.stringify(this.session) ||
         (d.entries.length && JSON.stringify(d.entries[d.entries.length - 1]) !== JSON.stringify(this.entries[this.entries.length - 1]));
       if (!changed) return;
@@ -94,8 +96,10 @@ export class ChatView {
   }
 
   async older() {
+    const sid = this.sid, tok = this.tok;
     try {
-      const d = await get(`sessions/${encodeURIComponent(this.sid)}/transcript?limit=${PAGE}&before=${this.start}`);
+      const d = await get(`sessions/${encodeURIComponent(sid)}/transcript?limit=${PAGE}&before=${this.start}`);
+      if (sid !== this.sid || tok !== this.tok) return;
       const prevH = this.scrollH(), prevY = this.scrollTop();
       this.entries = d.entries.concat(this.entries); this.start = d.start;
       this.render(false);
@@ -165,9 +169,10 @@ export class ChatView {
       this.moreSlot = h("div", {});
       this.logSlot = h("div", {});
       this.box = ro ? h("div", { class: "chat-reply ro hint" }, "Read-only: this account is marked read-only in your DHI Orbit config, so this board does not reply, stop or open it. Use that account's own terminal.")
-        : h("div", { class: "chat-reply" },
+        : ((boxSid) => h("div", { class: "chat-reply" },
           this.attachStrip = h("div", { class: "attach-strip", hidden: true, "aria-live": "polite" }),
-          h("textarea", { class: "reply", rows: "3", "aria-label": "Reply", oninput: (e) => (this.reply = e.target.value),
+          // typing into this box while the next chat loads (the old page stays up) goes to this box's chat, never the next one
+          h("textarea", { class: "reply", rows: "3", "aria-label": "Reply", oninput: (e) => { if (this.sid === boxSid) this.reply = e.target.value; else this.drafts.set(boxSid, e.target.value); },
             onpaste: (e) => { const fs = e.clipboardData && e.clipboardData.files; if (fs && fs.length) { e.preventDefault(); this.attach(fs); } },   // a pasted screenshot or file
             onkeydown: (e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.send(); }
@@ -175,7 +180,7 @@ export class ChatView {
                 e.preventDefault(); this.ui.focusList();       // back to the list: arrows change chat
               }
             } }),
-          h("button", { class: "btn primary", onclick: () => this.send() }, "Send"));
+          h("button", { class: "btn primary", onclick: () => this.send() }, "Send")))(this.sid);
       const ta = this.box.querySelector("textarea");
       if (ta) {
         const pick = h("input", { type: "file", multiple: true, hidden: true, accept: ATTACH_ACCEPT, onchange: (e) => { this.attach(e.target.files); e.target.value = ""; } });
@@ -287,16 +292,25 @@ export class ChatView {
     const a = this.pend;
     if (a.some((f) => !f.path && !f.err)) { toast("Still uploading"); return; }
     const files = a.filter((f) => f.path);
-    let text = (this.reply || "").trim();
+    const box = this.box && this.box.querySelector("textarea");
+    let text = (box ? box.value : this.reply || "").trim();   // what the box shows is what is sent
     if (!text && !files.length) return;
     if (files.length) text += (text ? "\n\n" : "") + attachNote(files);
+    const sid = this.sid, session = this.session;
+    if (this.sending === sid) return;                  // a second Send before the first returns would send it twice
+    this.sending = sid;
     try {
-      const r = await post(`sessions/${encodeURIComponent(this.session.session_id)}/reply`, { text, key: this.session.key });
+      const r = await post(`sessions/${encodeURIComponent(session.session_id)}/reply`, { text, key: session.key });
       toast(r.queued ? "Queued: it is typed in when the chat finishes its turn" : "Sent");
-      a.length = 0; this.paintAttach();
-      this.reply = ""; const ta = this.el.querySelector(".chat-reply textarea"); if (ta) ta.value = "";
-      setTimeout(() => this.poll(), 600);
+      a.length = 0;
+      this.drafts.delete(sid);                         // a sent reply never comes back as this chat's draft
+      if (this.sid === sid) {                          // still on that chat: clear its box (another chat's draft is left alone)
+        this.paintAttach();
+        this.reply = ""; if (box && box.isConnected) box.value = "";
+        setTimeout(() => this.poll(), 600);
+      }
     } catch (e) { toast(`Not sent: ${e.message}`); }
+    finally { if (this.sending === sid) this.sending = null; }
   }
 }
 

@@ -28,17 +28,30 @@ function join(a, b) {
   return /\s$/.test(a) || /^\s/.test(b) ? a + b : a + " " + b;
 }
 
+// The box on the page now, or null when it has left the page (another chat opened, the card was answered).
+// Writing into a detached box fired its input handler, which put the old chat's words into the open chat's reply.
 function boxOf(c) {
   if (c.ta.isConnected) return c.ta;
   const t = c.key && document.querySelector(`textarea[data-fk="${CSS.escape(c.key)}"]`);
   if (t) c.ta = t;
-  return t || c.ta;
+  return t || null;
 }
 
 function put(c, text) {
   const ta = boxOf(c);
+  if (!ta) return false;
   ta.value = text;
+  c.last = text;
   ta.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+}
+
+// The box no longer holds what dictation last wrote: it was sent and cleared, edited by hand, or filled with a
+// draft. Continue from what is there now, so a sent prompt never comes back with the next words.
+function rebase(c, ta) {
+  if (ta.value === c.last) return;
+  c.base = ta.value + (ta.value && !/\s$/.test(ta.value) ? " " : "");
+  c.fin = "";
 }
 
 function mark(on) {
@@ -68,10 +81,13 @@ async function start(ta, btn) {
   rec.interimResults = true;
   if (local && "processLocally" in rec) { try { rec.processLocally = true; } catch { local = false; } }
   const sep = ta.value && !/\s$/.test(ta.value) ? " " : "";
-  const c = { rec, key: ta.dataset.fk || null, ta, base: ta.value + sep, fin: "", btns: new Set([btn]) };
+  const c = { rec, key: ta.dataset.fk || null, ta, base: ta.value + sep, fin: "", last: ta.value, btns: new Set([btn]) };
   cur = c;
   rec.onresult = (e) => {
     if (cur !== c) return;
+    const box = boxOf(c);
+    if (!box) { stopDictation(); return; }
+    rebase(c, box);
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript;
@@ -87,13 +103,16 @@ async function start(ta, btn) {
   };
   rec.onend = () => {
     if (cur !== c) return;
-    c.base = join(c.base, c.fin); c.fin = "";
-    put(c, c.base);                                   // drop any interim words that never became final
+    const box = boxOf(c);
+    if (!box) { stopDictation(); return; }
+    if (box.value === c.last) { c.base = join(c.base, c.fin); c.fin = ""; put(c, c.base); }   // drop interim words that never became final
+    else rebase(c, box);                              // sent or edited since the last words: keep what is there
     try { rec.start(); } catch { stopDictation(); }   // a silence pause ends recognition: keep listening until stopped
   };
   try { rec.start(); } catch { cur = null; toast("Dictation could not start"); return; }
   mark(true);
-  boxOf(c).focus();
+  const b0 = boxOf(c);
+  if (b0) b0.focus();
 }
 
 // A mic button for one textarea. Adopt an existing dictation if this box is a re-render of the one being dictated.
