@@ -107,6 +107,12 @@ export function cardBody(x, ui, onChange) {
     wrap.append(h("div", { class: "ask" }, x.text),
       h("div", { class: "opts" }, h("button", { class: "opt rec", onclick: () => ui.send(x, { text: RESUME_TEXT }, "Resume") },
         h("kbd", {}, "1"), "Resume now")));
+  } else if (x.kind === "dialog") {
+    // A permission dialog whose options are not on the board yet (its screen was not read this refresh). No free-text box: text typed
+    // into the terminal would answer the dialog with the wrong keys. The Yes / No buttons appear here as soon as the screen is read.
+    wrap.append(h("div", { class: "ask" }, x.text || "(no question text)"),
+      h("div", { class: "hint" }, "Reading this chat's dialog; its options (Yes / No) show here in a moment. To answer now, open its terminal."),
+      !ro && h("div", { class: "opts" }, h("button", { class: "btn", onclick: () => ui.terminal(x) }, "Open in Terminal")));
   } else {
     wrap.append(h("div", { class: "ask" }, x.text || "(no question text)"));
     if (x.suggested && !ro) {
@@ -114,14 +120,14 @@ export function cardBody(x, ui, onChange) {
         onclick: () => ui.send(x, { text: x.suggested }, x.suggested) }, h("kbd", {}, "1"), x.suggested)));
     }
   }
-  if (!ro && x.draft && x.draft.text && x.kind !== "decision") {
+  if (!ro && x.draft && x.draft.text && x.kind !== "decision" && x.kind !== "dialog") {
     wrap.append(h("details", { class: "evidence draft" },
       h("summary", {}, `Draft (${x.draft.class === "retrieved" ? "how you replied to similar messages before" : x.draft.class}, never sent by itself)`),
       h("p", { class: "final" }, x.draft.text),
       (x.draft.pairs || []).slice(1).map((p) => h("p", { class: "hint" }, "Also: ", p.reply)),
       h("button", { class: "btn", onclick: () => ui.useDraft(x, x.draft) }, "Use as reply")));
   }
-  if (!ro && x.kind !== "decision") wrap.append(replyBox(x, d, ui));
+  if (!ro && x.kind !== "decision" && x.kind !== "dialog") wrap.append(replyBox(x, d, ui));
   return wrap;
 }
 
