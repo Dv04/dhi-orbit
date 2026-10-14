@@ -47,7 +47,7 @@ FAILS: dict[str, list] = {}
 LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DHI Orbit</title><style>body{font:16px -apple-system,system-ui,sans-serif;max-width:420px;margin:15vh auto;padding:0 16px}
 input,button{font:inherit;padding:8px;width:100%;box-sizing:border-box;margin-top:8px}</style></head><body>
-<h2>DHI Orbit</h2><p>Enter the access key (shown on the computer running DHI Orbit, Seats tab).</p>
+<h2>DHI Orbit</h2><p>Enter the access key: the contents of the file .token in DHI Orbit's data folder on the computer running it (by default ~/.config/dhi-orbit/.token).</p>
 <input id="k" type="password" autocomplete="current-password"><button id="b">Sign in</button><p id="m"></p>
 <script>
 async function go(k){const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:k})});
