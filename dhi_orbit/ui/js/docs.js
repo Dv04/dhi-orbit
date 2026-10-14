@@ -59,7 +59,7 @@ export class DocsDrawer {
 
   // The chat's list; called on every chat open and refresh (cheap: the server reads only new transcript bytes).
   async load(sid) {
-    if (sid !== this.sid) { this.sid = sid; this.docs = []; if (this.isOpen) this.cur = null; }
+    if (sid !== this.sid) { this.sid = sid; this.docs = []; this.cur = null; }   // also when closed: the next open must not show the last chat's document
     let same = false;
     try {
       const d = await get(`sessions/${encodeURIComponent(sid)}/docs`);

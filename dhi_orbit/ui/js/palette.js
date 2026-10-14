@@ -49,7 +49,7 @@ export class Palette {
     const q = this.input.value.trim();
     this.items = this.sources().map((it) => ({ ...it, s: fuzzy(q, it.label) })).filter((it) => it.s > 0)
       .sort((a, b) => b.s - a.s).slice(0, 12);
-    this.sel = 0;
+    this.sel = 0; this.moved = false;
     this.render();
     clearTimeout(this.timer);
     this.parsed = null;
@@ -73,10 +73,23 @@ export class Palette {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       this.sel = Math.max(0, Math.min(this.items.length - 1, this.sel + (e.key === "ArrowDown" ? 1 : -1)));
+      this.moved = true;
       this.render();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (this.parsed) this.exec(this.parsed); else if (this.items[this.sel]) this.run(this.items[this.sel]);
+      if (this.parsed) { this.exec(this.parsed); return; }
+      const q = this.input.value.trim();
+      // A sentence typed fast: Enter came before the 160 ms preview parse. Parse it now instead of running the top fuzzy match
+      // (an arrow-picked row is the person's choice and runs as picked).
+      if (!this.moved && q.split(/\s+/).length >= 2) {
+        clearTimeout(this.timer);
+        post("intent", { text: q, model: false }).then((r) => {
+          if (this.input.value.trim() !== q) return;
+          if (r && r.cmd) this.exec(r); else if (this.items[this.sel]) this.run(this.items[this.sel]);
+        }).catch(() => { if (this.items[this.sel]) this.run(this.items[this.sel]); });
+        return;
+      }
+      if (this.items[this.sel]) this.run(this.items[this.sel]);
     }
   }
 

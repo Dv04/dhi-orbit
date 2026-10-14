@@ -858,8 +858,13 @@ export class Graph {
     this.tip.hidden = true;
     this.panelId = n.id;
     const ui = this.ui, isS = n.type === "session";
-    const ta = isS && !n.excluded && h("textarea", { class: "reply", rows: "3", placeholder: "Reply to this chat", "aria-label": "Reply" });
     const item = isS ? (ui.itemFor(n.session_id) || { kind: "blocked", session_id: n.session_id, key: n.key, title: n.label, excluded: n.excluded }) : null;
+    // A permission dialog or a hook question is answered with its options on the board ("Answer on the board"), never with free
+    // text: typed into the terminal it would answer the dialog with the wrong keys (the chat view locks its box for the same reason).
+    const ta = isS && !n.excluded && !(item.kind === "dialog" || item.kind === "decision") && h("textarea", { class: "reply", rows: "3", placeholder: "Reply to this chat", "aria-label": "Reply" });
+    // the panel is kept across polls, so the box is emptied after a send: a second click must not send it again
+    const sendReply = () => { const t = ta.value.trim(); if (!t) return; ui.send(item, { text: t }, t); ta.value = ""; };
+    if (ta) ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply(); } });
     const rc = n.receipt;
     // the parts that change while the panel is open are kept, so a poll can update them in place (refreshPanel)
     this.pd = { chip: h("span", { class: "chip g-st" }), act: n.activity ? h("p", { class: "hint g-act" }) : null, fin: n.final ? md(n.final, "final md") : null, final: n.final || "" };
@@ -874,7 +879,7 @@ export class Graph {
         h("span", { class: "chip" }, `${rc.files} files`), rc.test && h("span", { class: "testline" }, rc.test),
         (rc.prs || []).map((u) => h("a", { href: u, target: "_blank", rel: "noopener noreferrer" }, u.replace(/^https:\/\/github.com\//, "")))),
       isS && n.needs_you && h("button", { class: "btn primary", onclick: () => ui.jumpTo(n.session_id) }, "Answer on the board"),
-      ta && h("div", { class: "replyrow" }, ta, micFor(ta), h("button", { class: "btn", onclick: () => ta.value.trim() && ui.send(item, { text: ta.value.trim() }, ta.value.trim()) }, "Reply")),
+      ta && h("div", { class: "replyrow" }, ta, micFor(ta), h("button", { class: "btn", onclick: sendReply }, "Reply")),
       isS && !n.excluded && h("div", { class: "row" },
         h("a", { class: "btn", href: "#/chat/" + encodeURIComponent(n.session_id) }, "Chat history"),
         h("button", { class: "btn", onclick: () => ui.terminal(n) }, "Open terminal"),

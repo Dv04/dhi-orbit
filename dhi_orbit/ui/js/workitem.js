@@ -97,7 +97,9 @@ export async function renderWorkItem(el, id, ui) {
   if (fresh) el.replaceChildren(h("div", { class: "skeleton" }));
   let w;
   try { w = await get("workitems/" + encodeURIComponent(id)); }
-  catch (e) { if (!fresh) return; el.replaceChildren(h("div", { class: "empty" }, h("h3", {}, `Work item ${id}`), h("p", {}, e.message))); return; }
+  catch (e) { if (!fresh || el.dataset.wi !== id) return; el.replaceChildren(h("div", { class: "empty" }, h("h3", {}, `Work item ${id}`), h("p", {}, e.message))); return; }
+  if (el.dataset.wi !== id) return;                         // another work item opened while this one loaded
+  if (!fresh && el.querySelector(".state-edit:not([readonly])")) return;   // Edit was pressed meanwhile: never drop what is typed
   const props = (w.proposals || []).filter((p) => p.state === "proposed");
   const ta = h("textarea", { class: "reply state-edit", rows: "18", "aria-label": "State of play", spellcheck: "false", readonly: true });
   ta.value = w.state_text || "";
