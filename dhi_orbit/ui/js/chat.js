@@ -5,7 +5,7 @@ import { h, ct, age, toast } from "./lib.js";
 import { seatsAtLimit, limitWord } from "./limits.js";
 import { md } from "./md.js";
 import { get, post, TOKEN } from "./api.js";
-import { micFor } from "./dictate.js";
+import { micFor, stopDictation } from "./dictate.js";
 import { cardBody, timeoutLine } from "./cards.js";
 import { DocsDrawer, onDocLink } from "./docs.js";
 
@@ -45,7 +45,7 @@ export class ChatView {
 
   async open(sid) {
     clearInterval(this.timer);
-    if (sid !== this.sid) { if (this.sid) this.drafts.set(this.sid, this.reply || ""); this.sid = sid; this.entries = []; this.reply = this.drafts.get(sid) || ""; }
+    if (sid !== this.sid) { stopDictation(); if (this.sid) this.drafts.set(this.sid, this.reply || ""); this.sid = sid; this.entries = []; this.reply = this.drafts.get(sid) || ""; }
     const tok = this.tok = (this.tok || 0) + 1;       // arrowing through chats fast: only the last one opened may paint
     this.built = null;
     if (this.embedded && this.pageEl && this.el.contains(this.pageEl)) this.el.classList.add("loading");   // keep the old chat dimmed instead of a flash
@@ -287,7 +287,8 @@ export class ChatView {
     const a = this.pend;
     if (a.some((f) => !f.path && !f.err)) { toast("Still uploading"); return; }
     const files = a.filter((f) => f.path);
-    let text = (this.reply || "").trim();
+    const box = this.box && this.box.querySelector("textarea");
+    let text = (box ? box.value : this.reply || "").trim();   // what the box shows is what is sent
     if (!text && !files.length) return;
     if (files.length) text += (text ? "\n\n" : "") + attachNote(files);
     try {

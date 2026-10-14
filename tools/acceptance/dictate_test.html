@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Dictation test</title>
+<!-- Regression test for js/dictate.js with a scripted SpeechRecognition (no microphone). Run: node dictate_test.mjs
+     ?src=<module path> tests another copy of dictate.js (the control run). Result JSON lands in window.__result. -->
+<div id="toast"></div>
+<div id="root"></div>
+<script>
+  // Scripted recognizer: say(text, final) appends a result like Chrome's continuous mode; pause() ends it as silence does.
+  class FakeSR {
+    constructor() { this.results = []; this.running = false; }
+    start() { if (this.running) throw new Error("already started"); this.running = true; this.results = []; window.__rec = this; }
+    stop() { this.running = false; }
+    say(text, final = true) {
+      const last = this.results[this.results.length - 1];
+      const r = Object.assign([{ transcript: text }], { isFinal: final });
+      let idx;
+      if (last && !last.isFinal) { idx = this.results.length - 1; this.results[idx] = r; } else { idx = this.results.length; this.results.push(r); }
+      this.onresult && this.onresult({ resultIndex: idx, results: this.results });
+    }
+    pause() { this.running = false; this.onend && this.onend(); }
+  }
+  window.SpeechRecognition = FakeSR;
+</script>
+<script type="module">
+  const src = new URLSearchParams(location.search).get("src") || "../../dhi_orbit/ui/js/dictate.js";
+  const { micFor, stopDictation } = await import(src);
+  const tick = () => new Promise((r) => setTimeout(r, 30));
+  const root = document.getElementById("root");
+  const out = {};
+
+  // A reply box the way chat.js builds one: its input handler writes the open chat's shared reply.
+  const chat = { reply: "", drafts: new Map(), sid: "A" };
+  function chatBox() {
+    const ta = document.createElement("textarea");
+    ta.oninput = (e) => (chat.reply = e.target.value);
+    const btn = micFor(ta);
+    root.replaceChildren(ta, btn);
+    return { ta, btn };
+  }
+  function send(ta) { const sent = ta.value; chat.reply = ""; ta.value = ""; return sent; }
+
+  // 1. dictate, send, keep talking: the sent prompt must not come back
+  let { ta, btn } = chatBox();
+  btn.click(); await tick();
+  __rec.say("hello", false); __rec.say("hello world");
+  out.first_words = ta.value;
+  out.sent = send(ta);
+  __rec.say("second");
+  out.after_send = ta.value;
+  // 2. a silence pause restarts recognition; words after it continue the new text only
+  __rec.pause(); await tick();
+  __rec.say("third");
+  out.after_pause = ta.value;
+  // 3. hand edit, then speech: continue from the edited text
+  ta.value = "edited"; ta.dispatchEvent(new Event("input"));
+  __rec.say("more");
+  out.after_edit = ta.value;
+  // 4. another chat opens (the box is replaced, dictation not stopped by the page): nothing may reach its reply
+  chat.drafts.set("A", chat.reply); chat.sid = "B"; chat.reply = "";
+  const b = chatBox();
+  __rec.say("leak");
+  out.chat_b_reply = chat.reply; out.chat_b_box = b.ta.value;
+  stopDictation();
+  // 5. a card box re-rendered with the same data-fk keeps receiving the words (the feature the fix must keep)
+  const card = document.createElement("textarea"); card.dataset.fk = "x:reply";
+  root.replaceChildren(card, micFor(card));
+  root.querySelector("button").click(); await tick();
+  __rec.say("one");
+  const card2 = document.createElement("textarea"); card2.dataset.fk = "x:reply"; card2.value = card.value;
+  root.replaceChildren(card2, micFor(card2));
+  __rec.say("two");
+  out.card_rerender = card2.value;
+  stopDictation();
+
+  const want = { first_words: "hello world", sent: "hello world", after_send: "second", after_pause: "second third",
+    after_edit: "edited more", chat_b_reply: "", chat_b_box: "", card_rerender: "one two" };
+  const fails = Object.keys(want).filter((k) => out[k] !== want[k]);
+  window.__result = JSON.stringify({ src, pass: fails.length === 0, fails: fails.map((k) => ({ k, got: out[k], want: want[k] })) });
+</script>
