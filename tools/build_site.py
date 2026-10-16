@@ -3,7 +3,8 @@
 
     python3 tools/build_site.py        needs the `markdown` package at build time only; the site itself is plain HTML.
 """
-import json, re, shutil, pathlib, markdown
+import json, re, shutil, pathlib
+from mdrender import render
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC, OUT = ROOT / "site-src", ROOT / "site"
@@ -79,7 +80,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',
 md = (ROOT / "README.md").read_text()
 md = re.sub(r'^<p align="center">.*?</p>\n', "", md, count=1, flags=re.S)
 md = md.replace("https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/screenshots/", "/img/")
-body = markdown.markdown(md, extensions=["fenced_code", "tables", "toc"])
+body = render(md)
 DOCS = HEAD.format(site=SITE, title="DHI Orbit documentation", desc="Install, connect accounts, usage limits, other agents, phone access and the security model for DHI Orbit.") + NAV + '<main class="doc">' + body + "</main>" + FOOT + "</body></html>"
 (OUT / "docs" / "index.html").write_text(DOCS)
 (OUT / "_headers").write_text("/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n")
