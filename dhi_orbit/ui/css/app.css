@@ -927,3 +927,12 @@ dialog.palette::backdrop { background: oklch(0% 0 0 / .35); }
   .doc-scroll { padding: 16px 16px 60px; }
 }
 @media (prefers-reduced-motion: reduce) { .doc-drawer, :root.doc-docked body { transition: none; } }
+
+/* Messages queued for a chat that is mid-turn (chat.js paintQueue): one row each, oldest first, with Edit and Delete. */
+.chat-reply .queue-strip { grid-column: 1 / -1; display: grid; gap: var(--s2); }
+.queue-item { display: flex; align-items: center; gap: var(--s2); padding: 4px var(--s2); border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); min-width: 0; }
+.queue-item .qn { flex: none; font-variant-numeric: tabular-nums; opacity: .6; }
+.queue-item .qt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-item .hint { flex: none; }
+.queue-item.editing { align-items: stretch; }
+.queue-item.editing .reply { flex: 1 1 auto; }

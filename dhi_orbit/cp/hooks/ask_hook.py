@@ -105,8 +105,8 @@ def main(stdin=sys.stdin, env=os.environ, sleep=time.sleep, clock=time.time) -> 
                     " delivered=1, delivery='hook-default' WHERE id=? AND state='open'",
                     (json.dumps(rec), clock(), row["id"])) == 1:
                 db.log_auto("decision_hook", mode, payload.get("session_id"), seat, "default taken",
-                            "low risk, every part had a recommended option, hold expired", {"answers": rec})
-                emit(payload, rec, "low-risk question unanswered for the hold time: recommended option taken")
+                            f"{row['risk']} risk, every part had a recommended option, hold expired", {"answers": rec})
+                emit(payload, rec, f"{row['risk']}-risk question unanswered for the hold time: recommended option taken")
                 return 0
         return 0                     # dialog shows; the card stays answerable through the dialog
     d = decisions.get(row["id"])     # an answer won the race against the release

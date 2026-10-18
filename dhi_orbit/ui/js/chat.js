@@ -143,6 +143,11 @@ export class ChatView {
         !ro && !s.provider && h("button", { class: "btn", "aria-pressed": String(!!(kw && kw.on)), title: "Ping just before the cache expires, for 12 h",
           onclick: () => act("keepwarm", { action: kw && kw.on ? "off" : "on", hours: 12 }, kw && kw.on ? "Auto keep-warm off" : "Auto keep-warm on for 12 h") },
           kw && kw.on ? "Auto keep-warm: on" : "Auto keep-warm: off"),
+        !ro && !s.provider && s.kind === "bg" && s.autopilot && h("button", { class: "btn", "aria-pressed": String(!!s.autopilot.on),
+          title: "While you are away: when this chat asks a question and you have not answered in 2 minutes, the recommended option is taken for low and medium risk questions. High risk and questions without a recommended option still wait for you. Switches itself off after 12 h; everything taken is listed on the board.",
+          onclick: async () => { try { const r = await post(`sessions/${encodeURIComponent(s.session_id)}/autopilot`, { on: !s.autopilot.on }); this.session = r.session; this.render(false);
+            toast(r.session.autopilot.on ? `Autopilot on for 12 h (until ${ct(r.session.autopilot.until, true)})` : "Autopilot off"); } catch (e) { toast(`Not changed: ${e.message}`); } } },
+          s.autopilot.on ? `Autopilot: on until ${ct(s.autopilot.until, true)}` : "Autopilot: off"),
         !s.provider && resumeSeg(s, async (pref) => {
           try { const r = await post(`sessions/${encodeURIComponent(s.session_id)}/resume_pref`, { pref }); this.session = r.session; this.render(false);
             toast(pref === "on" ? "Limit resume ON for this chat: it is resumed when its limit resets" : pref === "off" ? "Limit resume off for this chat" : `This chat follows the global setting (${s.resume.global})`); }
@@ -170,6 +175,7 @@ export class ChatView {
       this.logSlot = h("div", {});
       this.box = ro ? h("div", { class: "chat-reply ro hint" }, "Read-only: this account is marked read-only in your DHI Orbit config, so this board does not reply, stop or open it. Use that account's own terminal.")
         : ((boxSid) => h("div", { class: "chat-reply" },
+          this.queueSlot = h("div", { class: "queue-strip", hidden: true, "aria-live": "polite" }),
           this.attachStrip = h("div", { class: "attach-strip", hidden: true, "aria-live": "polite" }),
           // typing into this box while the next chat loads (the old page stays up) goes to this box's chat, never the next one
           h("textarea", { class: "reply", rows: "3", "aria-label": "Reply", oninput: (e) => { if (this.sid === boxSid) this.reply = e.target.value; else this.drafts.set(boxSid, e.target.value); },
@@ -203,6 +209,7 @@ export class ChatView {
       }
     }
     this.paintAttach();
+    this.paintQueue();
     const ta = this.box.querySelector("textarea");
     if (ta) ta.placeholder = s.provider ? `Reply to ${s.provider_label} (Cmd+Enter sends); it continues this ${s.provider_label} thread` : s.live ? (this.embedded ? "Reply (Cmd+Enter sends). While this box is empty: Up and Down switch chat, Left goes to the list" : "Reply to this chat (Cmd+Enter sends)") : "This chat is not running; a reply resumes it in the background";
     if (!this.headSlot.contains(document.activeElement) || !this.headSlot.firstChild) this.headSlot.replaceChildren(head);
@@ -263,6 +270,39 @@ export class ChatView {
   }
 
   get pend() { let a = this.attachBy.get(this.sid); if (!a) this.attachBy.set(this.sid, a = []); return a; }
+
+  // Messages sent while the chat was mid-turn wait here (server side, Sender.queue) until its turn ends; each can be edited or deleted until then.
+  paintQueue() {
+    const slot = this.queueSlot; if (!slot || !slot.isConnected) return;
+    const sid = this.sid, q = (this.session && this.session.queued) || [];
+    if (this.qEdit && (this.qEdit.sid !== sid || !q.some((m) => m.id === this.qEdit.id))) this.qEdit = null;   // sent or removed meanwhile
+    slot.hidden = !q.length;
+    if (!q.length) { slot.replaceChildren(); return; }
+    const act = async (body, ok) => {
+      try { await post(`sessions/${encodeURIComponent(sid)}/queue`, body); toast(ok); }
+      catch (e) { toast(e.status === 409 ? "Already typed in" : `Not changed: ${e.message}`); }
+      this.qEdit = null; if (this.sid === sid) this.poll();
+    };
+    slot.replaceChildren(h("div", { class: "hint" }, `Waiting for this chat's turn to end (${q.length}), typed in one at a time:`),
+      ...q.map((m, i) => {
+        if (this.qEdit && this.qEdit.id === m.id) {
+          const ta = h("textarea", { class: "reply", rows: "2", "aria-label": "Edit queued message",
+            oninput: (e) => { this.qEdit.text = e.target.value; },
+            onkeydown: (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); act({ action: "edit", id: m.id, text: this.qEdit.text }, "Queued message updated"); } else if (e.key === "Escape") { this.qEdit = null; this.paintQueue(); } } });
+          ta.value = this.qEdit.text;
+          return h("div", { class: "queue-item editing" }, ta,
+            h("button", { type: "button", class: "btn primary", onclick: () => act({ action: "edit", id: m.id, text: this.qEdit.text }, "Queued message updated") }, "Save"),
+            h("button", { type: "button", class: "btn ghost", onclick: () => { this.qEdit = null; this.paintQueue(); } }, "Cancel"));
+        }
+        return h("div", { class: "queue-item" },
+          h("span", { class: "qn" }, String(i + 1)),
+          h("span", { class: "qt", title: m.text }, m.text),
+          h("span", { class: "hint" }, age(Date.now() / 1000 - m.at) + " ago"),
+          h("button", { type: "button", class: "btn ghost", onclick: () => { this.qEdit = { sid, id: m.id, text: m.text }; this.paintQueue(); } }, "Edit"),
+          h("button", { type: "button", class: "btn ghost", "aria-label": `Delete queued message ${i + 1}`, onclick: () => act({ action: "delete", id: m.id }, "Removed from the queue") }, "Delete"));
+      }));
+    const ed = slot.querySelector("textarea"); if (ed && !slot.contains(document.activeElement)) ed.focus();
+  }
 
   paintAttach() {
     if (!this.attachStrip) return;

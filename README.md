@@ -166,6 +166,14 @@ Everything that sends text into a chat on its own has a mode, `off`, `dry-run` o
 Automatic keep-warm (a tiny ping before a chat's prompt cache expires) is off until you switch it on in the toolbar.
 Permission prompts are never answered automatically.
 
+Autopilot is a per-chat switch in a background chat's toolbar and is off for every chat until you press it. While it is on
+(12 hours, then it switches itself off), a question you have not answered in 2 minutes gets its recommended option when the
+question is low or medium risk. High risk questions and questions without a recommended option always wait for you, and the
+board lists everything autopilot answered until you mark it seen. It needs `decision_hook` to be `on`.
+
+Messages you send to a chat that is mid-turn wait in a list above the reply box (up to 10 per chat), are typed in one at a time
+when the turn ends, and can be edited or deleted until then. They are held in memory, so restarting Orbit drops them.
+
 Two optional Claude Code hooks feed the board. They are not installed for you; register them yourself in
 the Claude Code configuration of each account you want covered:
 

@@ -39,6 +39,14 @@ export async function renderSettings(el, ui) {
       m.recent.length ? h("details", { class: "recent" }, h("summary", {}, `Last ${m.recent.length}: ${m.recent[0].decision}, ${age(Date.now() / 1000 - m.recent[0].at)} ago`),
         h("ul", {}, m.recent.map((r) => h("li", {}, h("span", { class: "at" }, ct(r.at, true)), " ", h("b", {}, r.decision), " ", r.reason))))
         : h("p", { class: "hint" }, "Nothing logged yet."),
+      m.key === "decision_hook" && h("div", { class: "overrides" },
+        h("p", { class: "hint" }, (s.autopilot || []).length ? "Autopilot chats (medium risk questions with a recommended option are answered when you do not; each switches itself off):" :
+          "Autopilot is off for every chat. Open a chat and press Autopilot before you leave: for 12 h its medium risk questions with a recommended option are answered after 2 minutes; high risk ones wait. Low risk ones are answered after the normal hold either way."),
+        (s.autopilot || []).length > 0 && h("ul", { class: "sess" }, s.autopilot.map((r) => h("li", {},
+          h("span", { class: "st working", "aria-hidden": "true" }),
+          h("a", { class: "nm", href: "#/chat/" + encodeURIComponent(r.session_id) }, r.name || r.session_id.slice(0, 8)),
+          h("span", { class: "rt" }, `until ${ct(r.until, true)}`),
+          h("button", { class: "btn ghost", onclick: async () => { try { await post(`sessions/${encodeURIComponent(r.session_id)}/autopilot`, { on: false }); toast("Autopilot off"); redraw(); } catch (e) { toast(e.message); } } }, "Off"))))),
       m.key === "limit_resume" && h("div", { class: "overrides" },
         h("p", { class: "hint" }, (s.resume_prefs || []).length ? "Per-chat overrides (these win over the switch on the right):" :
           "Per-chat: open a chat (Sessions) and set Limit resume to on to resume only that chat, while this stays dry-run or off."),

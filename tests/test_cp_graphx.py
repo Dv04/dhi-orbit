@@ -128,8 +128,9 @@ def test_waiting_chain_and_routes(tmp):
     banner = {"resets_at": NOW + 600, "shown_at": NOW - 1200, "text": "limit"}
     s = snap(chat("s1", banner=banner), seats=[{"seat": "work", "config": H + "/.claude-work", "five_hour": {"pct": 100}, "seven_day": {"pct": 4}}])
     w = graphx.waiting(s, [{"session_id": "s2", "title": "Q", "kind": "decision", "seconds": 50}],
-                       {"s3": {"text": "go", "at": NOW - 30}}, NOW)
+                       {"s3": [{"text": "go", "at": NOW - 30}, {"text": "and then this", "at": NOW - 10}]}, NOW)
     assert [c["waits_on"] for c in w["chains"]] == ["you", "seat:work", "turn"]
+    assert [i["text"] for i in w["chains"][2]["items"]] == ["go", "and then this"]          # every waiting message is listed, not only the last
     assert w["longest"]["seconds"] == 1200
     src = type("S", (), {"get": lambda self: snap(chat("s1")), "col": Col()})()
     for path in ("gx/files", "gx/hot", "gx/hotspots", "gx/search?q=x", "gx/spend", "gx/prs", "gx/outcomes", "gx/waiting", "gx/overlaps", "gx/index"):
