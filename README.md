@@ -1,11 +1,30 @@
 <p align="center"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/orbit-lockup-dark.png" alt="DHI Orbit" width="480"></p>
 
-<p align="center"><b>DHI Orbit is free and open source. If it saves you time, please support its development:</b><br>
-<a href="https://github.com/sponsors/Dv04"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/sponsor-github.svg" alt="Sponsor on GitHub" height="40"></a> <a href="https://www.paypal.com/paypalme/DevSanghvi48"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/sponsor-paypal.svg" alt="PayPal" height="40"></a> <a href="https://account.venmo.com/u/Dev-Sanghvi-1"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/sponsor-venmo.svg" alt="Venmo" height="40"></a></p>
+<p align="center">
+<a href="https://pypi.org/project/dhi-orbit/"><img src="https://img.shields.io/pypi/v/dhi-orbit?color=3b82f6" alt="PyPI version"></a>
+<a href="https://pypi.org/project/dhi-orbit/"><img src="https://img.shields.io/pypi/pyversions/dhi-orbit" alt="Python versions"></a>
+<a href="https://github.com/Dv04/dhi-orbit/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dv04/dhi-orbit" alt="MIT licence"></a>
+<img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No Python dependencies">
+<img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20(beta)-lightgrey" alt="Platforms">
+<a href="https://github.com/Dv04/dhi-orbit/discussions"><img src="https://img.shields.io/github/discussions/Dv04/dhi-orbit" alt="Discussions"></a>
+</p>
 
 # DHI Orbit
 
-One local board for every coding-agent chat on your machine: Claude Code, Codex, Cursor, Gemini CLI and Antigravity, and any other terminal agent you describe in a small `agents.json`.
+**Running several coding-agent chats at once? One local page shows which one needs you, lets you answer from the page, and tracks your 5-hour and 7-day limits.** Claude Code, Codex, Cursor, Gemini CLI, Antigravity and any terminal agent you describe in `agents.json`.
+
+<p align="center"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/demo.gif" alt="DHI Orbit: the board of what needs you, the graph of chats and work items, and the light theme (synthetic demo data)" width="860"></p>
+
+<sub>Real UI, synthetic data (no real chats). Regenerate with `tools/mock/server.py` and `tools/acceptance/shoot.mjs`.</sub>
+
+```sh
+pipx install dhi-orbit    # or: brew install Dv04/dhi-orbit/dhi-orbit
+dhi-orbit --open          # opens http://127.0.0.1:8787/
+```
+
+Local only (loopback), Python standard library only, MIT. Viewing costs zero model tokens: it only reads files.
+
+## What you get
 
 - A board of what needs you: questions, permission prompts, blocked jobs, and chats stalled on a usage limit.
 - Every agent's chats in the same lists, labelled with the tool's name (see [Other agents on the same board](#other-agents-on-the-same-board)).
@@ -16,7 +35,7 @@ One local board for every coding-agent chat on your machine: Claude Code, Codex,
 - Optional WebGL "nebula" look (Settings, Look). The default look is plain and needs no GPU. Settings > Quality scales it for weaker machines.
 - Python standard library only: no Python dependencies, no build step, no CDN. The documents reader ships three small browser libraries in the package (marked, DOMPurify, highlight.js; their licences are in `dhi_orbit/ui/js/vendor`). Runs on macOS, Linux and Windows (beta).
 
-Viewing costs zero model tokens: DHI Orbit only reads files. A reply you send is one normal turn in that chat.
+A reply you send is one normal turn in that chat.
 
 ## Screenshots
 
@@ -371,7 +390,7 @@ python3 -m pytest -q
 ```
 
 `tools/mock/server.py` serves the UI with synthetic data (no real chats are read); `tools/acceptance/` holds the UI
-checks. `docs/DESIGN.md` records the visual design.
+checks. `docs/DESIGN.md` records the visual design. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started and [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Report a bug or send feedback
 
@@ -380,6 +399,9 @@ Settings > Report a bug or send feedback opens a new issue on <https://github.co
 GitHub and submit it yourself.
 
 ## Support and questions
+
+<p align="center"><b>DHI Orbit is free and open source. If it saves you time, please support its development:</b><br>
+<a href="https://github.com/sponsors/Dv04"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/sponsor-github.svg" alt="Sponsor on GitHub" height="40"></a> <a href="https://www.paypal.com/paypalme/DevSanghvi48"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/sponsor-paypal.svg" alt="PayPal" height="40"></a> <a href="https://account.venmo.com/u/Dev-Sanghvi-1"><img src="https://raw.githubusercontent.com/Dv04/dhi-orbit/main/docs/brand/sponsor-venmo.svg" alt="Venmo" height="40"></a></p>
 
 Questions and ideas: [GitHub Discussions](https://github.com/Dv04/dhi-orbit/discussions). Bugs: [Issues](https://github.com/Dv04/dhi-orbit/issues).
 
