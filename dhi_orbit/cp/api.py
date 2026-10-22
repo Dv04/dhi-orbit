@@ -490,6 +490,7 @@ def settings_view(ctx: dict | None = None) -> dict:
     except Exception:
         out["resume_prefs"] = []
     live_row = (ctx or {}).get("chat_row")      # a chat the snapshot no longer carries is archived: not listed here
+    out["resume_prefs"] = [r for r in out["resume_prefs"] if not live_row or live_row(r["key"])]
     try:
         out["autopilot"] = [r for r in dec_store.autopilot_rows() if not live_row or live_row(r["key"])]
     except Exception:
@@ -497,8 +498,8 @@ def settings_view(ctx: dict | None = None) -> dict:
     out["decision_hold_s"] = cfg.get("decision_hold_s")
     kw = (ctx or {}).get("kw")
     out["keepwarm"] = {"auto": kw.auto_on() if kw else None,
-                       "chats": [dict(r, name=((ctx.get("chat_row") or (lambda k: None))(r["key"]) or {}).get("name"))
-                                 for r in kw.active_rows()] if kw else [],
+                       "chats": [dict(r, name=row.get("name")) for r in kw.active_rows()
+                                 if (row := ((ctx.get("chat_row") or (lambda k: None))(r["key"]) or {}))] if kw else [],
                        "available": bool(kw)}
     return out
 

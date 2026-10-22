@@ -35,6 +35,15 @@ def test_settings_view_reports_the_app_version_for_bug_reports(tmpdb):
     assert api.settings_view()["app_version"] == dhi_orbit.__version__
 
 
+def test_settings_lists_hide_archived_chats(tmpdb):
+    from dhi_orbit.cp import resume
+    for sid in ("live", "gone"):
+        resume.set_pref({"session_id": sid, "key": sid, "name": sid}, "on")
+    rows = {"live": {"name": "live"}}
+    assert [r["key"] for r in api.settings_view({"chat_row": rows.get})["resume_prefs"]] == ["live"]
+    assert len(api.settings_view()["resume_prefs"]) == 2   # no snapshot (dev server): nothing is hidden
+
+
 def test_dashboard_is_served_at_the_root_and_still_at_v2(tmpdb):
     from dhi_orbit.cp import mount
 
