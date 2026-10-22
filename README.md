@@ -2,9 +2,9 @@
 
 <p align="center">
 <a href="https://pypi.org/project/dhi-orbit/"><img src="https://img.shields.io/pypi/v/dhi-orbit?color=3b82f6" alt="PyPI version"></a>
-<a href="https://pypi.org/project/dhi-orbit/"><img src="https://img.shields.io/pypi/pyversions/dhi-orbit" alt="Python versions"></a>
+<a href="https://pypi.org/project/dhi-orbit/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10 or newer"></a>
 <a href="https://github.com/Dv04/dhi-orbit/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dv04/dhi-orbit" alt="MIT licence"></a>
-<img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No Python dependencies">
+<img src="https://img.shields.io/badge/dependencies-none%20(macOS%2FLinux)-brightgreen" alt="No Python dependencies">
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20(beta)-lightgrey" alt="Platforms">
 <a href="https://github.com/Dv04/dhi-orbit/discussions"><img src="https://img.shields.io/github/discussions/Dv04/dhi-orbit" alt="Discussions"></a>
 </p>

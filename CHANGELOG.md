@@ -36,7 +36,7 @@ User-visible changes per release, newest first. Full notes with links: [Releases
 - Windows support (beta): ConPTY terminal layer through `pywinpty`.
 - `--open` opens the dashboard in your browser; Ctrl+C stops it cleanly.
 
-## 0.3.7 (2026-10-06)
+## 0.3.7 (2026-10-07)
 - Dashboard at `http://127.0.0.1:8787/` (no `/v2/`); `/v2/` still works.
 - Settings > Report a bug or send feedback (opens a prefilled GitHub issue; nothing is sent from the dashboard).
 - New chat dialog with work-item picker; file attachments on replies (25 MB cap, deleted after 30 days); resizable chat split; `?` shortcut sheet; phone layout fixes.
