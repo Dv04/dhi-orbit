@@ -35,6 +35,15 @@ def test_settings_view_reports_the_app_version_for_bug_reports(tmpdb):
     assert api.settings_view()["app_version"] == dhi_orbit.__version__
 
 
+def test_settings_lists_hide_archived_chats(tmpdb):
+    from dhi_orbit.cp import resume
+    for sid in ("live", "gone"):
+        resume.set_pref({"session_id": sid, "key": sid, "name": sid}, "on")
+    rows = {"live": {"name": "live"}}
+    assert [r["key"] for r in api.settings_view({"chat_row": rows.get})["resume_prefs"]] == ["live"]
+    assert len(api.settings_view()["resume_prefs"]) == 2   # no snapshot (dev server): nothing is hidden
+
+
 def test_dashboard_is_served_at_the_root_and_still_at_v2(tmpdb):
     from dhi_orbit.cp import mount
 
@@ -571,3 +580,53 @@ def test_dashboard_root_files_exist():
     for f in mount.ROOT_FILES:
         if f != "/":
             assert devserver.ui_file(f) and os.path.getsize(devserver.ui_file(f)) > 0, f
+
+
+def test_autopilot_route_row_overview_digest_and_seen(tmpdb):
+    s = snap(chats=[chat(kind="bg", job_id="j1", state="idle")])
+    src = type("S", (), {"get": lambda self: s})()
+    assert api.handle("GET", "sessions", {}, {}, src)[1]["sessions"][0]["autopilot"]["on"] is False       # off until you turn it on
+    assert api.handle("POST", "sessions/s1/autopilot", {}, {"on": "yes"}, src)[0] == 400
+    assert api.handle("POST", "sessions/nope/autopilot", {}, {"on": True}, src)[0] == 404
+    code, out = api.handle("POST", "sessions/s1/autopilot", {}, {"on": True}, src)
+    assert code == 200 and out["session"]["autopilot"]["on"] is True and out["session"]["autopilot"]["until"] > time.time()
+    assert api.handle("GET", "sessions", {}, {}, src)[1]["sessions"][0]["autopilot"]["on"] is True
+    assert api.handle("GET", "settings", {}, {}, src)[1]["autopilot"][0]["session_id"] == "s1"
+    db.execute("INSERT INTO decisions(id, session_id, seat, question, answer, risk, risk_why, asked_at, answered_at, answered_by, state, evidence)"
+               " VALUES('d1','s1','work','Commit this?',?, 'med','rule', ?, ?, 'timeout-default','answered','{\"autopilot\": true}')",
+               (json.dumps({"Commit this?": "Yes (Recommended)"}), time.time() - 600, time.time() - 500))
+    ov = api.handle("GET", "overview", {}, {}, src)[1]
+    assert [(x["title"], x["taken"], x["autopilot"]) for x in ov["auto_taken"]] == [(s["chats"][0]["name"], "Yes (Recommended)", True)]
+    assert api.handle("POST", "decisions/auto_seen", {}, {}, src)[0] == 200
+    assert api.handle("GET", "overview", {}, {}, src)[1]["auto_taken"] == []          # marked seen
+    assert api.handle("POST", "sessions/s1/autopilot", {}, {"on": False}, src)[1]["session"]["autopilot"]["on"] is False
+
+
+def test_autopilot_refused_for_a_chat_it_cannot_answer_for(tmpdb):
+    s = snap(chats=[chat(kind="interactive"), chat(session_id="s2", key="work:s2", kind="bg", excluded=True)])
+    src = type("S", (), {"get": lambda self: s})()
+    assert api.handle("POST", "sessions/s1/autopilot", {}, {"on": True}, src)[0] == 403      # a terminal chat has no hook to answer through
+    assert api.handle("POST", "sessions/s2/autopilot", {}, {"on": True}, src)[0] == 403      # read-only account
+    from dhi_orbit.cp import decisions
+    assert decisions.autopilot_map() == {}
+
+
+def test_queue_route_lists_edits_and_deletes_waiting_messages(tmpdb):
+    from dhi_orbit.cp import send
+    s = snap(chats=[chat(state="working")])
+    src = type("S", (), {"get": lambda self: s})()
+    sender = send.Sender(src, reply_fn=lambda c, t: {"ok": True})
+    ctx = {"sender": sender}
+    assert api.handle("POST", "sessions/s1/reply", {}, {"text": "first"}, src, ctx)[1]["queued"] is True
+    assert api.handle("POST", "sessions/s1/reply", {}, {"text": "second"}, src, ctx)[1]["waiting"][1]["text"] == "second"
+    rows = api.handle("GET", "sessions", {}, {}, src, ctx)[1]["sessions"]
+    assert [q["text"] for q in rows[0]["queued"]] == ["first", "second"]
+    a, b = (q["id"] for q in rows[0]["queued"])
+    assert api.handle("POST", "sessions/s1/queue", {}, {"action": "edit", "id": a, "text": "first, better"}, src, ctx)[0] == 200
+    assert api.handle("POST", "sessions/s1/queue", {}, {"action": "delete", "id": b}, src, ctx)[0] == 200
+    assert api.handle("POST", "sessions/s1/queue", {}, {"action": "delete", "id": b}, src, ctx)[0] == 409
+    assert api.handle("POST", "sessions/s1/queue", {}, {"action": "nope", "id": a}, src, ctx)[0] == 400
+    assert api.handle("POST", "sessions/s1/queue", {}, {"action": "delete", "id": "1"}, src, ctx)[0] == 400
+    assert api.handle("POST", "sessions/s1/queue", {}, {"action": "delete", "id": a}, src)[0] == 501      # no sender: read-only server
+    code, out = api.handle("GET", "gx/waiting", {}, {}, src, {"sender": sender, "queue": sender.queue})
+    assert code == 200 and [i["text"] for ch in out["chains"] for i in ch["items"] if i["kind"] == "queued reply"] == ["first, better"]

@@ -205,7 +205,7 @@ function replyBox(x, d, ui) {
 
 export function timeoutLine(x) {
   if (x.kind === "decision") {
-    if (x.held && x.on_timeout === "default" && x.timeout_at) return `Low risk: if unanswered by ${ct(x.timeout_at)}, the recommended option is taken.`;
+    if (x.held && x.on_timeout === "default" && x.timeout_at) return `${x.risk === "med" ? "Medium risk, chat on autopilot" : "Low risk"}: if unanswered by ${ct(x.timeout_at)}, the recommended option is taken.`;
     if (x.held && x.timeout_at) return `The chat is held for your answer until ${ct(x.timeout_at)}, then it shows its own dialog; this card stays answerable.`;
     if (x.mode === "dry-run") return "Dry-run: the chat shows its own dialog now; answering here types into that dialog.";
     return "The chat shows its own dialog; answering here types into it.";

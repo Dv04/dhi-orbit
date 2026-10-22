@@ -9,6 +9,7 @@ import time
 
 from .. import _plat, config
 from . import db, limits, resume, sources
+from . import decisions as dec_store
 
 STALE_S = 60          # a snapshot older than this is not "ok"
 
@@ -260,10 +261,25 @@ def overview(snap: dict, now: float) -> dict:
     ready = answers_ready(snap, now)
     counts["answers_ready"] = len(ready)
     return {"generated_at": now, "snapshot_at": snap.get("at"), "health": h["state"], "proposals": props, "answers_ready": ready,
+            "auto_taken": auto_taken_view(snap, now),
             "health_reasons": h["reasons"], "needs_you": ny,
             "longest_wait": ({"id": oldest["id"], "seconds": oldest["seconds"], "kind": oldest["kind"],
                               "title": oldest["title"]} if oldest else None),
             "counts": counts, "capacity": capacity(snap, now)}
+
+
+def auto_taken_view(snap: dict, now: float) -> list[dict]:
+    """Questions answered for you while you were away (recommended option taken after the hold), not yet marked seen; at most 24 h back."""
+    try:
+        seen = float(db.settings().get("auto_seen_at") or 0)
+    except (TypeError, ValueError):
+        seen = 0.0
+    try:
+        rows = dec_store.auto_taken(max(seen, now - 24 * 3600))
+    except Exception:
+        return []
+    names = {c["session_id"]: c["name"] for c in snap["chats"]}
+    return [dict(r, title=names.get(r["session_id"]) or r["session_id"][:8]) for r in rows]
 
 
 def capacity(snap: dict, now: float) -> dict:
@@ -416,7 +432,7 @@ def validate_setting(key: str, body: dict) -> str | None:
 
 MODE_DOCS = {
     "limit_resume": ("Limit resume", "When a seat's 5-hour limit resets, type the resume line into chats that stalled on it."),
-    "decision_hook": ("Question hold", "Hold a chat's AskUserQuestion for the board; low risk takes the recommended option at the end of the hold."),
+    "decision_hook": ("Question hold", "Hold a chat's AskUserQuestion for the board; low risk takes the recommended option at the end of the hold (medium too, for a chat you switched Autopilot on for)."),
     "stop_gate": ("Evidence gate", "Block a coding chat from ending a turn that changed files without a named check (max 3 times)."),
     "handoff": ("Handoff", "After you confirm a chat is done, write its note into the state doc and stop the session."),
     "shadow_drafts": ("Draft replies", "Suggest replies for prose questions, paid by the chat's own seat (capped $2 a day)."),
@@ -473,11 +489,17 @@ def settings_view(ctx: dict | None = None) -> dict:
         out["resume_prefs"] = db.rows("SELECT session_id, key, name, pref, set_at FROM cp_resume_pref ORDER BY set_at DESC")
     except Exception:
         out["resume_prefs"] = []
+    live_row = (ctx or {}).get("chat_row")      # a chat the snapshot no longer carries is archived: not listed here
+    out["resume_prefs"] = [r for r in out["resume_prefs"] if not live_row or live_row(r["key"])]
+    try:
+        out["autopilot"] = [r for r in dec_store.autopilot_rows() if not live_row or live_row(r["key"])]
+    except Exception:
+        out["autopilot"] = []
     out["decision_hold_s"] = cfg.get("decision_hold_s")
     kw = (ctx or {}).get("kw")
     out["keepwarm"] = {"auto": kw.auto_on() if kw else None,
-                       "chats": [dict(r, name=((ctx.get("chat_row") or (lambda k: None))(r["key"]) or {}).get("name"))
-                                 for r in kw.active_rows()] if kw else [],
+                       "chats": [dict(r, name=row.get("name")) for r in kw.active_rows()
+                                 if (row := ((ctx.get("chat_row") or (lambda k: None))(r["key"]) or {}))] if kw else [],
                        "available": bool(kw)}
     return out
 
@@ -515,7 +537,7 @@ def put_config(body: dict, log_as: str = "config_change") -> str | None:
     return None
 
 
-def _session_row(c: dict, now: float, prefs: dict | None = None) -> dict:
+def _session_row(c: dict, now: float, prefs: dict | None = None, queued: list | None = None, ap: dict | None = None) -> dict:
     if prefs is None:
         prefs = resume.prefs()
     gm = db.mode("limit_resume")
@@ -528,12 +550,15 @@ def _session_row(c: dict, now: float, prefs: dict | None = None) -> dict:
             "activity": c.get("activity"), "warmth": c.get("warmth"), "cache_age_min": c.get("cache_age_min"),
             "kw": c.get("kw"), "excluded": c["excluded"], "job_id": c.get("job_id"), "bg_shell": bool(c.get("bg_shell")),
             "limited": bool(c.get("banner")), "final": (c.get("final") or "")[-300:], "final_at": c.get("final_at"),
-            "units_today": c.get("units_today"), "provider": c.get("provider"), "provider_label": c.get("provider_label")}
+            "units_today": c.get("units_today"), "provider": c.get("provider"), "provider_label": c.get("provider_label"),
+            "queued": queued or [],
+            "autopilot": {"on": c["session_id"] in ap, "until": ap.get(c["session_id"])} if ap is not None else None}
 
 
-def sessions_list(snap: dict, now: float) -> list[dict]:
+def sessions_list(snap: dict, now: float, sender=None) -> list[dict]:
     pf = resume.prefs()
-    rows = [_session_row(c, now, pf) for c in snap["chats"] if c["kind"] != "headless"]
+    ap = dec_store.autopilot_map(now)
+    rows = [_session_row(c, now, pf, sender.queued(c["session_id"]) if sender else None, ap) for c in snap["chats"] if c["kind"] != "headless"]
     rank = {"needs_you": 0, "working": 1, "idle": 2, "stopped": 3}
     return sorted(rows, key=lambda r: (rank.get(r["state"], 4), -(r["activity"] or 0)))
 
@@ -634,7 +659,7 @@ def _handle(method: str, path: str, query: dict, body: dict, src: "sources.Sourc
         if head == "settings":
             return 200, settings_view(ctx)
         if head == "sessions" and len(parts) == 1:
-            return 200, {"sessions": sessions_list(snap, now)}
+            return 200, {"sessions": sessions_list(snap, now, ctx.get("sender"))}
         if head == "sessions" and len(parts) == 3 and parts[2] == "transcript":
             from . import transcript
             c = next((c for c in snap["chats"] if c["session_id"] == parts[1] or c["key"] == parts[1]), None)
@@ -642,7 +667,8 @@ def _handle(method: str, path: str, query: dict, body: dict, src: "sources.Sourc
                 return 404, {"error": "no such session in the last few days"}
             before = q1("before")
             pg = transcript.page(c["path"], int(before) if before not in (None, "") else None, int(q1("limit") or 200))
-            return 200, {"session": _session_row(c, now), **pg}
+            sd = ctx.get("sender")
+            return 200, {"session": _session_row(c, now, None, sd.queued(c["session_id"]) if sd else None, dec_store.autopilot_map(now)), **pg}
         if head == "sessions" and len(parts) == 3 and parts[2] in ("docs", "doc"):
             # the chat's .md files (docs) and one file's text (doc?path=), for the chat view's Docs reader (cp/docs.py)
             from . import docs
@@ -752,6 +778,20 @@ def _handle(method: str, path: str, query: dict, body: dict, src: "sources.Sourc
                 return 400, {"error": "pref must be on, off or default"}
             resume.set_pref(c, None if pref == "default" else pref)
             return 200, {"ok": True, "session": _session_row(c, now)}
+        if head == "sessions" and len(parts) == 3 and parts[2] == "autopilot":
+            c = next((c for c in snap["chats"] if c["session_id"] == parts[1]), None)
+            if not c:
+                return 404, {"error": "no such chat"}
+            if c["excluded"] or c["kind"] != "bg":
+                return 403, {"error": "autopilot answers questions of background chats on an account this board can reach"}
+            on = body.get("on")
+            if not isinstance(on, bool):
+                return 400, {"error": "on must be true or false"}
+            dec_store.set_autopilot(c, on)
+            return 200, {"ok": True, "session": _session_row(c, now, None, None, dec_store.autopilot_map(now))}
+        if head == "decisions" and parts[1:] == ["auto_seen"]:
+            db.put_setting("auto_seen_at", now)
+            return 200, {"ok": True}
         if head == "sessions" and len(parts) == 3 and parts[2] == "keepwarm":
             kw, row = ctx.get("kw"), (ctx.get("chat_row") or (lambda k: None))
             c = next((c for c in snap["chats"] if c["session_id"] == parts[1]), None)
@@ -799,6 +839,13 @@ def _handle(method: str, path: str, query: dict, body: dict, src: "sources.Sourc
             if not ctx.get("sender"):
                 return 501, {"error": "read-only server"}
             return ctx["sender"].reply(parts[1], body.get("text", ""), body.get("key"))
+        if head == "sessions" and len(parts) == 3 and parts[2] == "queue":     # edit or delete a message still waiting for the chat's turn to end
+            if not ctx.get("sender"):
+                return 501, {"error": "read-only server"}
+            act, qid = body.get("action"), body.get("id")
+            if act not in ("edit", "delete") or not isinstance(qid, int) or isinstance(qid, bool):
+                return 400, {"error": "action must be edit or delete, with the message id"}
+            return ctx["sender"].edit_queued(parts[1], qid, body.get("text", "") if act == "edit" else None)
         if head == "sessions" and len(parts) == 1:
             from . import work
             if not ctx.get("sender"):

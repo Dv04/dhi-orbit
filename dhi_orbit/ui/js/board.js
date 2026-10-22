@@ -151,6 +151,28 @@ function readyLine(ov, ui) {
   return el;
 }
 
+// Questions answered for you while you were away (the hold ended and the chat's recommended option was taken). Stays until you mark it seen.
+let autoNode = null;
+function autoLine(ov, ui) {
+  const list = (ov && ov.auto_taken) || [];
+  if (!list.length) { autoNode = null; return null; }
+  const sig = JSON.stringify(list.map((x) => x.id));
+  if (autoNode && autoNode.sig === sig) return autoNode.el;
+  const wasOpen = autoNode ? autoNode.el.open : true;
+  const seen = async () => { try { await post("decisions/auto_seen"); } catch (e) { toast(`Not marked: ${e.message}`); } ui.refresh(); };
+  const rows = list.map((x) => h("li", { class: "rd" },
+    h("a", { class: "t", href: "#/chat/" + encodeURIComponent(x.session_id), title: x.title }, x.title || "untitled"),
+    h("span", { class: "chip" + (x.risk === "med" ? " risk-med" : "") }, x.risk), x.autopilot && h("span", { class: "chip" }, "autopilot"),
+    h("span", { class: "grow" }),
+    h("span", { class: "hint" }, `${ct(x.answered_at, true)}`),
+    h("span", { class: "rd-snip" }, h("b", {}, "Q: "), x.question, " ", h("b", {}, "Taken: "), x.taken)));
+  const el = h("details", { class: "parked ready", open: wasOpen },
+    h("summary", {}, `${list.length} question${list.length === 1 ? "" : "s"} answered for you while you were away`),
+    h("ul", {}, [h("li", {}, h("span", { class: "grow" }), h("button", { class: "btn ghost", onclick: seen }, "Mark all seen")), ...rows]));
+  autoNode = { sig, el };
+  return el;
+}
+
 // ------------------------------------------------------------------ rail
 export function renderRail(el, ov, feed, ui) {
   const hl = healthOf(ov, feed);
@@ -263,7 +285,7 @@ export function renderNeeds(el, ov, ui) {
   const since = ui.review ? null : sinceLine(ov, ui.lastLooked);
   if (!items.length) {
     nodes.clear();
-    el.replaceChildren(head, since || "", parkedLine(parked, seats, ui) || "", readyLine(ov, ui) || "", h("div", { class: "empty" },
+    el.replaceChildren(head, since || "", autoLine(ov, ui) || "", parkedLine(parked, seats, ui) || "", readyLine(ov, ui) || "", h("div", { class: "empty" },
       h("h3", {}, ui.review ? "No open decisions" : "Nothing waits on you"),
       h("p", {}, "Questions from background chats, blocked jobs and stalled limits land here, urgent first. ",
         "Health above says whether that silence is measured.")));
@@ -292,7 +314,7 @@ export function renderNeeds(el, ov, ui) {
   const fk = a && a.dataset && a.dataset.fk, s0 = a && a.selectionStart, s1 = a && a.selectionEnd;
   const cur = list.children;
   if (cur.length !== els.length || els.some((e, i) => cur[i] !== e)) list.replaceChildren(...els);
-  const want = [head, since, parkedLine(parked, seats, ui), readyLine(ov, ui), list].filter(Boolean);
+  const want = [head, since, autoLine(ov, ui), parkedLine(parked, seats, ui), readyLine(ov, ui), list].filter(Boolean);
   for (const c of [...el.childNodes]) if (!want.includes(c)) c.remove();
   want.forEach((n, i) => { if (el.childNodes[i] !== n) el.insertBefore(n, el.childNodes[i] || null); });
   if (fk && document.activeElement !== a) {

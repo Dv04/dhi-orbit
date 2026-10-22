@@ -276,10 +276,11 @@ def waiting(snap: dict, needs: list[dict], queue: dict | None, now: float) -> di
         chains.append({"waits_on": f"seat:{s['seat']}", "label": f"Waiting on {s['seat']}'s limit reset", "resets_at": b, "items": items})
     if queue:
         items = []
-        for sid, q in queue.items():
+        for sid, qs in queue.items():
             m = meta.get(sid) or {}
-            items.append({"session_id": sid, "title": m.get("name") or sid[:8], "kind": "queued reply",
-                          "seconds": int(now - q.get("at", now)), "text": q.get("text", "")[:200]})
+            for q in qs:
+                items.append({"session_id": sid, "title": m.get("name") or sid[:8], "kind": "queued reply",
+                              "seconds": int(now - q.get("at", now)), "text": q.get("text", "")[:200]})
         if items:
             chains.append({"waits_on": "turn", "label": "Replies queued until the chat finishes its turn", "items": items})
     longest = max((i for ch in chains for i in ch["items"] if i.get("seconds") is not None), key=lambda i: i["seconds"], default=None)

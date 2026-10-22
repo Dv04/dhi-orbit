@@ -224,3 +224,73 @@ def test_reply_failure_is_reported_not_swallowed(tmp):
 def test_reply_validation(tmp):
     s = send.Sender(Src([chat()]), reply_fn=lambda c, t: {"ok": True})
     assert s.reply("s1", "   ")[0] == 400 and s.reply("nope", "x")[0] == 404
+
+
+def test_queued_messages_are_listed_edited_deleted_and_drain_in_order(tmp):
+    src = Src([chat(state="working")])
+    sent = []
+    s = send.Sender(src, reply_fn=lambda c, t: sent.append(t) or {"ok": True, "confirmed": True, "route": "attach"})
+    for t in ("one", "two", "three"):
+        assert s.reply("s1", t)[1]["queued"]
+    assert [q["text"] for q in s.queued("s1")] == ["one", "two", "three"]        # two presses no longer overwrite each other
+    ids = [q["id"] for q in s.queued("s1")]
+    assert s.edit_queued("s1", ids[1], "  two, edited ")[0] == 200
+    assert s.edit_queued("s1", ids[2], None)[0] == 200
+    assert s.edit_queued("s1", ids[2], None)[0] == 409                              # gone already
+    assert s.edit_queued("s1", ids[0], "   ")[0] == 400
+    assert [q["text"] for q in s.queued("s1")] == ["one", "two, edited"]
+    src.chats[0]["state"] = "idle"
+    s.drain()
+    assert sent == ["one"]
+    src.chats[0]["state"] = "working"
+    assert [q["text"] for q in s.queued("s1")] == ["two, edited"]
+    src.chats[0]["state"] = "idle"
+    s.drain()
+    assert sent == ["one", "two, edited"] and s.queue == {}
+
+
+def test_queue_is_capped_per_chat(tmp):
+    s = send.Sender(Src([chat(state="working")]), reply_fn=lambda c, t: {"ok": True})
+    for i in range(send.MAX_QUEUED):
+        assert s.reply("s1", f"m{i}")[0] == 200
+    assert s.reply("s1", "one too many")[0] == 429
+
+
+# ------------------------------------------------------------------ autopilot (per chat, opt-in, off by default)
+Q_MED = [{"question": "Commit this now?", "header": "Commit", "multiSelect": False,
+          "options": [{"label": "Yes (Recommended)"}, {"label": "No"}]}]
+SID = "11111111-2222"
+
+
+def test_autopilot_takes_medium_with_a_recommendation_but_never_high_or_unrecommended(tmp):
+    chat = {"session_id": SID, "key": "work:abcd", "name": "night chat", "account": "work"}
+    assert decisions.autopilot_map() == {}                                      # off by default
+    assert run_hook(payload(Q_MED)) == ""                                       # not flagged: medium waits for you
+    decisions.set_autopilot(chat, True)
+    out = json.loads(run_hook(payload(Q_MED, tuid="toolu_med000000001")))
+    assert out["hookSpecificOutput"]["updatedInput"]["answers"] == {"Commit this now?": "Yes (Recommended)"}
+    assert run_hook(payload(Q_HIGH, tuid="toolu_high00000001")) == ""          # high stays with you
+    no_rec = [{"question": "Commit it?", "header": "C", "multiSelect": False, "options": [{"label": "Yes"}, {"label": "No"}]}]
+    assert run_hook(payload(no_rec, tuid="toolu_norec0000001")) == ""          # no recommended option: nothing to take
+    taken = decisions.auto_taken(0)
+    assert [t["autopilot"] for t in taken] == [True] and taken[0]["taken"] == "Yes (Recommended)" and taken[0]["risk"] == "med"
+    assert db.rows("SELECT decision, reason FROM auto_log WHERE decision='default taken'")[0]["reason"].startswith("med risk")
+
+
+def test_autopilot_is_per_chat(tmp):
+    decisions.set_autopilot({"session_id": "other-chat", "key": "work:x", "name": "n", "account": "work"}, True)
+    assert run_hook(payload(Q_MED)) == ""                                       # another chat's flag does not reach this one
+    assert decisions.auto_taken(0) == []
+
+
+def test_autopilot_hold_is_short_and_expires(tmp):
+    chat = {"session_id": SID, "key": "work:abcd", "name": "n", "account": "work"}
+    decisions.set_autopilot(chat, True, hours=1, now=1000.0)
+    assert decisions.autopilot_map(1500.0) == {SID: 4600.0}
+    assert decisions.autopilot_map(5000.0) == {}                                # expired by itself
+    row = decisions.create(payload(Q_MED), mode="on", hold_s=630, seat="work", config="/c", job_id="j", now=1500.0)
+    assert row["hold_until"] - 1500.0 == decisions.AP_HOLD_S and row["on_timeout"] == "default"
+    decisions.set_autopilot(chat, False)
+    assert decisions.autopilot_map(1500.0) == {}
+    off = decisions.create(payload(Q_MED, tuid="toolu_off000000001"), mode="on", hold_s=630, seat="work", config="/c", job_id="j", now=1500.0)
+    assert off["on_timeout"] == "dialog" and off["hold_until"] - 1500.0 == 630     # switched off: back to the normal rules

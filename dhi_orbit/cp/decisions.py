@@ -3,7 +3,8 @@
 Lifecycle (design rules):
   hook (mode on) writes the row with held=1 and polls it until hold_until.
     The user answers while held   -> state answered; the hook returns allow + updatedInput {questions, answers}.
-    hold ends, low risk and every part has a recommended option -> the recommended answers are taken.
+    hold ends, low risk and every part has a recommended option -> the recommended answers are taken
+                                (medium too, for a chat with autopilot on; its hold is capped at AP_HOLD_S).
     hold ends otherwise      -> held=0 and the chat shows its own dialog; the card stays answerable and
                                 an answer is typed into that dialog (single-question dialogs only).
   mode dry-run: the row is written with held=0 (no hold); the dialog shows at once; the card answers it.
@@ -22,6 +23,62 @@ from . import db, risk
 
 REC = "(recommended)"
 MARGIN_S = 30          # hold ends this long before the hook's own timeout
+
+# Autopilot (per chat, opt-in, off by default): a chat you flag before leaving also gets its MEDIUM-risk questions answered with the
+# recommended option when the hold ends. High risk, a question without a recommended option and the chat's own raised risk stay with you.
+# It expires by itself so a flag never outlives the night; the hold is shorter because nobody is watching.
+AP_HOURS = 12
+AP_HOLD_S = 120
+AP_SCHEMA = "CREATE TABLE IF NOT EXISTS cp_autopilot (session_id TEXT PRIMARY KEY, key TEXT, name TEXT, set_at REAL, until REAL);"
+
+
+def _ap_table(path: str | None = None) -> None:
+    c = db.connect(path)
+    c.executescript(AP_SCHEMA)
+    c.commit()
+    c.close()
+
+
+def autopilot_map(now: float | None = None, path: str | None = None) -> dict[str, float]:
+    """{session_id: until} for every chat whose autopilot has not expired."""
+    _ap_table(path)
+    return {r["session_id"]: r["until"] for r in db.rows("SELECT session_id, until FROM cp_autopilot WHERE until>?", (now or time.time(),), path)}
+
+
+def autopilot_rows(now: float | None = None, path: str | None = None) -> list[dict]:
+    _ap_table(path)
+    return db.rows("SELECT session_id, key, name, set_at, until FROM cp_autopilot WHERE until>? ORDER BY set_at DESC", (now or time.time(),), path)
+
+
+def set_autopilot(chat: dict, on: bool, hours: float = AP_HOURS, now: float | None = None, path: str | None = None) -> float | None:
+    now = now or time.time()
+    _ap_table(path)
+    if not on:
+        db.execute("DELETE FROM cp_autopilot WHERE session_id=?", (chat["session_id"],), path)
+        db.log_auto("autopilot", "on", chat["session_id"], chat.get("account"), "off", "board", None, path)
+        return None
+    until = now + hours * 3600
+    db.execute("INSERT OR REPLACE INTO cp_autopilot(session_id, key, name, set_at, until) VALUES(?,?,?,?,?)",
+               (chat["session_id"], chat.get("key"), chat.get("name"), now, until), path)
+    db.log_auto("autopilot", "on", chat["session_id"], chat.get("account"), "on", f"board: until {until:.0f}", None, path)
+    return until
+
+
+def auto_taken(since: float, path: str | None = None) -> list[dict]:
+    """Questions answered without you (hold ended, recommended option taken), newest first: the morning digest."""
+    out = []
+    for r in db.rows("SELECT id, session_id, seat, question, answer, risk, risk_why, asked_at, answered_at, evidence FROM decisions"
+                     " WHERE answered_by='timeout-default' AND answered_at>? ORDER BY answered_at DESC LIMIT 50", (since,), path):
+        try:
+            ans = json.loads(r.pop("answer") or "{}")
+        except ValueError:
+            ans = {}
+        try:
+            ap = bool(json.loads(r.pop("evidence") or "{}").get("autopilot"))
+        except ValueError:
+            ap = False
+        out.append(dict(r, taken="; ".join(str(v) for v in ans.values()), autopilot=ap))
+    return out
 
 
 def parts_from_input(tool_input: dict) -> list[dict]:
@@ -45,8 +102,12 @@ def create(payload: dict, *, mode: str, hold_s: float, seat: str, config: str, j
     now = now or time.time()
     parts = parts_from_input(payload.get("tool_input") or {})
     lvl, why = risk.of_parts(parts)
-    default_ok = lvl == "low" and parts and all(p["recommended"] for p in parts)
+    sid = payload.get("session_id")
+    ap = bool(sid) and sid in autopilot_map(now, path)
+    default_ok = lvl in (("low", "med") if ap else ("low",)) and parts and all(p["recommended"] for p in parts)
     held = mode == "on"
+    if ap and held:
+        hold_s = min(hold_s, AP_HOLD_S)
     row = {
         "id": decision_id(payload.get("session_id"), payload.get("tool_use_id"), parts),
         "session_id": payload.get("session_id"), "config": config, "seat": seat, "work_item": work_item,
@@ -58,7 +119,7 @@ def create(payload: dict, *, mode: str, hold_s: float, seat: str, config: str, j
         "timeout_at": now + hold_s if held else now, "state": "open",
         "parts": json.dumps(parts), "tool_use_id": payload.get("tool_use_id"), "held": 1 if held else 0,
         "hold_until": now + hold_s if held else now, "job_id": job_id, "mode": mode,
-        "evidence": json.dumps({"transcript": payload.get("transcript_path"), "cwd": payload.get("cwd")}),
+        "evidence": json.dumps({"transcript": payload.get("transcript_path"), "cwd": payload.get("cwd"), "autopilot": ap}),
     }
     cols = ", ".join(row)
     db.execute(f"INSERT OR REPLACE INTO decisions({cols}) VALUES({', '.join('?' * len(row))})",
